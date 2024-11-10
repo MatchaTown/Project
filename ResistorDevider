@@ -1,0 +1,31 @@
+contoh kode sensor tegangan resistor devider
+#define BATTERY_PIN 35 // Pin ADC untuk pembagi tegangan
+const float V_MAX = 4.2;   // Tegangan maksimum baterai
+const float V_MIN = 3.0;   // Tegangan minimum baterai
+const float R1 = 5100.0;   // Nilai resistor R1 dalam ohm (5,1kΩ)
+const float R2 = 10000.0;  // Nilai resistor R2 dalam ohm (10kΩ)
+
+void setup() {
+    Serial.begin(115200);
+    analogReadResolution(12); // Resolusi ADC ESP32
+}
+
+void loop() {
+    int adcValue = analogRead(BATTERY_PIN);  // Baca nilai ADC
+    float voltageOut = (adcValue / 4095.0) * 3.3;  // Konversi ke tegangan output
+    float batteryVoltage = voltageOut * ((R1 + R2) / R2);  // Hitung tegangan baterai
+
+    // Hitung kapasitas baterai dalam persentase
+    float batteryPercentage = ((batteryVoltage - V_MIN) / (V_MAX - V_MIN)) * 100.0;
+    if (batteryPercentage > 100) batteryPercentage = 100;
+    if (batteryPercentage < 0) batteryPercentage = 0;
+
+    // Tampilkan hasil
+    Serial.print("Tegangan Baterai: ");
+    Serial.print(batteryVoltage, 2);
+    Serial.print(" V, Kapasitas Baterai: ");
+    Serial.print(batteryPercentage, 1);
+    Serial.println(" %");
+
+    delay(1000);  // Delay 1 detik untuk pembacaan berikutnya
+}
