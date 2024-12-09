@@ -1,0 +1,451 @@
+[
+    {
+        "id": "c8b1575b4010ed02",
+        "type": "tab",
+        "label": "Flow 1",
+        "disabled": false,
+        "info": "",
+        "env": []
+    },
+    {
+        "id": "0ad265b7073f1b2e",
+        "type": "mqtt in",
+        "z": "c8b1575b4010ed02",
+        "name": "",
+        "topic": "sensor/suhBpkHaji",
+        "qos": "1",
+        "datatype": "auto-detect",
+        "broker": "672ca6999c027364",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 210,
+        "y": 300,
+        "wires": [
+            [
+                "5f796f7062da20eb"
+            ]
+        ]
+    },
+    {
+        "id": "5f796f7062da20eb",
+        "type": "ui_gauge",
+        "z": "c8b1575b4010ed02",
+        "name": "",
+        "group": "d82ecddbd6b7f9ef",
+        "order": 4,
+        "width": 3,
+        "height": 3,
+        "gtype": "gage",
+        "title": "Suhu Tubuh",
+        "label": "° Celcius",
+        "format": "{{value}}",
+        "min": 0,
+        "max": "50",
+        "colors": [
+            "#00b500",
+            "#e6e600",
+            "#ca3838"
+        ],
+        "seg1": "15",
+        "seg2": "38",
+        "diff": false,
+        "className": "",
+        "x": 490,
+        "y": 300,
+        "wires": []
+    },
+    {
+        "id": "4f35264c2f0c2ebd",
+        "type": "mqtt in",
+        "z": "c8b1575b4010ed02",
+        "name": "",
+        "topic": "sensor/heart_rateBpkHaji",
+        "qos": "2",
+        "datatype": "auto-detect",
+        "broker": "672ca6999c027364",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 230,
+        "y": 140,
+        "wires": [
+            [
+                "065596ec634cfb38",
+                "ce8ef10b1268dd6c"
+            ]
+        ]
+    },
+    {
+        "id": "19479ce0a69e35e7",
+        "type": "mqtt in",
+        "z": "c8b1575b4010ed02",
+        "name": "",
+        "topic": "sensor/spo2BpkHaji",
+        "qos": "2",
+        "datatype": "auto-detect",
+        "broker": "672ca6999c027364",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 210,
+        "y": 240,
+        "wires": [
+            [
+                "6ba9d9d1088e3823"
+            ]
+        ]
+    },
+    {
+        "id": "6ba9d9d1088e3823",
+        "type": "ui_gauge",
+        "z": "c8b1575b4010ed02",
+        "name": "",
+        "group": "d82ecddbd6b7f9ef",
+        "order": 3,
+        "width": 7,
+        "height": 4,
+        "gtype": "donut",
+        "title": "Saturasi Oksigen",
+        "label": "%",
+        "format": "{{value}}",
+        "min": 0,
+        "max": "100",
+        "colors": [
+            "#b30000",
+            "#e6e600",
+            "#2cbf03"
+        ],
+        "seg1": "34",
+        "seg2": "80",
+        "diff": false,
+        "className": "",
+        "x": 510,
+        "y": 240,
+        "wires": []
+    },
+    {
+        "id": "065596ec634cfb38",
+        "type": "ui_chart",
+        "z": "c8b1575b4010ed02",
+        "name": "",
+        "group": "d82ecddbd6b7f9ef",
+        "order": 2,
+        "width": 7,
+        "height": 3,
+        "label": "",
+        "chartType": "line",
+        "legend": "false",
+        "xformat": "HH:mm:ss",
+        "interpolate": "linear",
+        "nodata": "",
+        "dot": false,
+        "ymin": "0",
+        "ymax": "200",
+        "removeOlder": 1,
+        "removeOlderPoints": "",
+        "removeOlderUnit": "3600",
+        "cutout": 0,
+        "useOneColor": false,
+        "useUTC": false,
+        "colors": [
+            "#1ea9b3",
+            "#aec7e8",
+            "#ff7f0e",
+            "#2ca02c",
+            "#98df8a",
+            "#d62728",
+            "#ff9896",
+            "#9467bd",
+            "#c5b0d5"
+        ],
+        "outputs": 1,
+        "useDifferentColor": false,
+        "className": "",
+        "x": 470,
+        "y": 140,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "e8557f80362035f3",
+        "type": "mqtt in",
+        "z": "c8b1575b4010ed02",
+        "name": "MQTT Input",
+        "topic": "lokasi/BpkHaji",
+        "qos": "2",
+        "datatype": "auto",
+        "broker": "672ca6999c027364",
+        "nl": false,
+        "rap": false,
+        "inputs": 0,
+        "x": 190,
+        "y": 480,
+        "wires": [
+            [
+                "394e5c6e6b7b558f"
+            ]
+        ]
+    },
+    {
+        "id": "394e5c6e6b7b558f",
+        "type": "function",
+        "z": "c8b1575b4010ed02",
+        "name": "Store Coordinates",
+        "func": "flow.set('coordinates', msg.payload);\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 410,
+        "y": 480,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "7bcb21ad24348aa3",
+        "type": "ui_button",
+        "z": "c8b1575b4010ed02",
+        "name": "Open Map",
+        "group": "d82ecddbd6b7f9ef",
+        "order": 10,
+        "width": 5,
+        "height": 1,
+        "passthru": false,
+        "label": "Cek Lokasi",
+        "tooltip": "",
+        "color": "",
+        "bgcolor": "",
+        "className": "",
+        "icon": "map",
+        "payload": "",
+        "payloadType": "str",
+        "topic": "",
+        "topicType": "str",
+        "x": 190,
+        "y": 540,
+        "wires": [
+            [
+                "4debb6e77fccb852"
+            ]
+        ]
+    },
+    {
+        "id": "4debb6e77fccb852",
+        "type": "function",
+        "z": "c8b1575b4010ed02",
+        "name": "Generate Link",
+        "func": "var coords = flow.get('coordinates');\nif (coords) {\n    msg.payload = \"window.open('http://maps.google.com/?q=\" + coords + \"', '_blank')\";\n}\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 400,
+        "y": 540,
+        "wires": [
+            [
+                "b124ea816bb694d5"
+            ]
+        ]
+    },
+    {
+        "id": "b124ea816bb694d5",
+        "type": "ui_template",
+        "z": "c8b1575b4010ed02",
+        "group": "d82ecddbd6b7f9ef",
+        "name": "Open Link",
+        "order": 12,
+        "width": 0,
+        "height": 0,
+        "format": "<script>\n    (function(scope) {\n        scope.$watch('msg.payload', function(payload) {\n            if (payload) {\n                eval(payload);\n            }\n        });\n    })(scope);\n</script>",
+        "storeOutMessages": true,
+        "fwdInMessages": true,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 590,
+        "y": 540,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "ce8ef10b1268dd6c",
+        "type": "ui_template",
+        "z": "c8b1575b4010ed02",
+        "group": "d82ecddbd6b7f9ef",
+        "name": "Heart Rate",
+        "order": 1,
+        "width": 0,
+        "height": 0,
+        "format": "<div class=\"card\">\n    <div class=\"header\">\n        <h3>Heart Rate Monitor</h3>\n    </div>\n    <div class=\"icon\">\n        <i class=\"fa fa-heartbeat\"></i>\n    </div>\n    <div class=\"value\">\n        <h1>{{msg.payload}} BPM</h1>\n    </div>\n    <div class=\"status\"\n        ng-style=\"{'background-color': (msg.payload < 60 || msg.payload > 160) ? '#ca3838' : '#00b500'}\">\n        <h4>Status: <span ng-bind=\"(msg.payload < 60 || msg.payload > 160) ? 'Warning' : 'Normal'\"></span></h4>\n    </div>\n</div>\n\n<style>\n    .card {\n        width: 100%;\n        max-width: 300px;\n        background-color: #f9f9f9;\n        border-radius: 10px;\n        padding: 20px;\n        box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.1);\n        text-align: center;\n        font-family: Arial, sans-serif;\n    }\n\n    .header h3 {\n        margin: 0;\n        color: #333;\n    }\n\n    .icon {\n        margin: 20px 0;\n        color: #ca3838;\n    }\n\n    .icon i {\n        font-size: 50px;\n    }\n\n    .value h1 {\n        margin: 0;\n        font-size: 38px;\n        color: #333;\n    }\n\n    .status {\n        margin-top: 20px;\n        padding: 5px;\n        border-radius: 5px;\n        color: white;\n    }\n\n    .status h4 {\n        margin: 0;\n    }\n</style>",
+        "storeOutMessages": true,
+        "fwdInMessages": true,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "custom-group",
+        "x": 490,
+        "y": 180,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "2e4ec36edcf1ab52",
+        "type": "mqtt in",
+        "z": "c8b1575b4010ed02",
+        "name": "",
+        "topic": "kapasitas/bpkHaji",
+        "qos": "2",
+        "datatype": "auto-detect",
+        "broker": "672ca6999c027364",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 200,
+        "y": 380,
+        "wires": [
+            [
+                "7eaad65721752cd6"
+            ]
+        ]
+    },
+    {
+        "id": "7eaad65721752cd6",
+        "type": "ui_gauge",
+        "z": "c8b1575b4010ed02",
+        "name": "",
+        "group": "d82ecddbd6b7f9ef",
+        "order": 6,
+        "width": 3,
+        "height": 3,
+        "gtype": "gage",
+        "title": "Baterai",
+        "label": "%",
+        "format": "{{value}}",
+        "min": "0",
+        "max": "100",
+        "colors": [
+            "#ff0000",
+            "#e7e71d",
+            "#00ff4c"
+        ],
+        "seg1": "34",
+        "seg2": "66",
+        "diff": false,
+        "className": "",
+        "x": 480,
+        "y": 380,
+        "wires": []
+    },
+    {
+        "id": "9c05c1664e359478",
+        "type": "ui_spacer",
+        "z": "c8b1575b4010ed02",
+        "name": "spacer",
+        "group": "d82ecddbd6b7f9ef",
+        "order": 5,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "18a95adb579b4c12",
+        "type": "ui_spacer",
+        "z": "c8b1575b4010ed02",
+        "name": "spacer",
+        "group": "d82ecddbd6b7f9ef",
+        "order": 7,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "70bd1dd3310df1d4",
+        "type": "ui_spacer",
+        "z": "c8b1575b4010ed02",
+        "name": "spacer",
+        "group": "d82ecddbd6b7f9ef",
+        "order": 8,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "179d2f1c05705b1e",
+        "type": "ui_spacer",
+        "z": "c8b1575b4010ed02",
+        "name": "spacer",
+        "group": "d82ecddbd6b7f9ef",
+        "order": 9,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "d21199bf0d6e7475",
+        "type": "ui_spacer",
+        "z": "c8b1575b4010ed02",
+        "name": "spacer",
+        "group": "d82ecddbd6b7f9ef",
+        "order": 11,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "672ca6999c027364",
+        "type": "mqtt-broker",
+        "name": "",
+        "broker": "test.mosquitto.org",
+        "port": "1883",
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": "4",
+        "keepalive": "60",
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthRetain": "false",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closeRetain": "false",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willRetain": "false",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    },
+    {
+        "id": "d82ecddbd6b7f9ef",
+        "type": "ui_group",
+        "name": "Tentara 1 (Shin)",
+        "tab": "056137aee01172d9",
+        "order": 1,
+        "disp": true,
+        "width": 7,
+        "collapse": false,
+        "className": ""
+    },
+    {
+        "id": "056137aee01172d9",
+        "type": "ui_tab",
+        "name": "Vital Signs Monitor",
+        "icon": "dashboard",
+        "disabled": false,
+        "hidden": false
+    }
+]
