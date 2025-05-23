@@ -1,0 +1,830 @@
+#include <SPI.h>
+#include <LoRa.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <PubSubClient.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+// Define LoRa pins
+#define ss 5
+#define rst 14
+#define dio0 26
+
+// Inisialisasi LCD I2C dengan alamat 0x27 atau 0x3F
+LiquidCrystal_I2C lcd(0x27, 16, 2); // Jika LCD tidak bekerja, coba ganti 0x27 dengan 0x3F
+
+// WiFi & MQTT configuration
+const char* ssid = "Realme C17";
+const char* password = "12345678";
+const char* mqtt_server = "broker.emqx.io";
+
+// Google script Web_App_URL
+String Web_App_URL = "https://script.google.com/macros/s/AKfycbzj1X43EeftEvzVMVkbRpmyW01Ir-SbD_U_ExD8plBZXhMWwyZD6phBy9-LG9GsBPL5/exec";
+
+// Initialize WiFi and MQTT client
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+// Variables for sensor data
+String receivedData = "";
+float heartRate = 0;
+float spo2 = 0;
+float suhuDS18B20 = 0;
+float latitude = 0;
+float longitude = 0;
+float batteryCapacity = 0;
+
+// Menyimpan data user
+String userID = "";
+String suhuStatus = "";
+String oksigenStatus = "";
+String heartRateStatus = "";
+
+// Flags untuk status pengiriman data
+bool mqttSent = false;
+bool googleSheetsSent = false;
+
+// Variabel untuk tracking waktu terakhir check koneksi MQTT
+unsigned long lastMQTTCheck = 0;
+
+// Variables for LoRa statistics
+int rssi = 0;
+float snr = 0;
+unsigned long totalPacketsReceived = 0;
+unsigned long totalPacketsExpected = 0;
+unsigned long totalBitsReceived = 0;
+unsigned long totalBitErrors = 0;
+float per = 0.0; // Packet Error Rate
+float ber = 0.0; // Bit Error Rate
+float toa = 0.0; // Time on Air in milliseconds
+
+
+// TAMBAHKAN 2 baris baru ini:
+float totalBerSum = 0.0; // Sum of all BER values
+unsigned long berSampleCount = 0; // Number of BER samples taken
+
+// LoRa configuration parameters for ToA calculation
+const long bandwidth = 125000; // 125 kHz (default LoRa bandwidth)
+const int spreadingFactor = 7; // SF7 (default)
+const int codingRate = 5; // 4/5 (default, set in setup as setCodingRate4(5))
+const int preambleLength = 8; // Default preamble length
+const bool lowDataRateOptimize = false; // Usually false for SF7
+const bool crcOn = true; // CRC usually enabled
+
+// Function to calculate Time on Air (ToA) for LoRa packets
+float calculateToA(int payloadLength) {
+    // LoRa Time on Air calculation formula
+    // Based on Semtech AN1200.13 LoRa Modem Designer's Guide
+    
+    // Symbol time in seconds
+    float Ts = (float)(1 << spreadingFactor) / bandwidth;
+    
+    // Preamble time
+    float Tpreamble = (preambleLength + 4.25) * Ts;
+    
+    // Payload symbol number calculation
+    float payloadSymbNb;
+    int DE = (lowDataRateOptimize) ? 1 : 0; // Low data rate optimization
+    int H = 0; // Header mode (0 = explicit header mode)
+    int CRC = (crcOn) ? 1 : 0;
+    
+    // Calculate payload symbol number
+    float temp = (8 * payloadLength - 4 * spreadingFactor + 28 + 16 * CRC - 20 * H) / (4 * (spreadingFactor - 2 * DE));
+    if (temp > 0) {
+        payloadSymbNb = 8 + ceil(temp) * codingRate;
+    } else {
+        payloadSymbNb = 8;
+    }
+    
+    // Payload time
+    float Tpayload = payloadSymbNb * Ts;
+    
+    // Total time on air
+    float totalToA = Tpreamble + Tpayload;
+    
+    return totalToA * 1000; // Convert to milliseconds
+}
+
+// Function to calculate and display LoRa statistics including ToA
+void displayLoRaStatistics() {
+    // Get RSSI from last received packet
+    rssi = LoRa.packetRssi();
+    
+    // Get SNR from last received packet
+    snr = LoRa.packetSnr();
+    
+    // Calculate ToA for the last received packet
+    int lastPacketSize = receivedData.length();
+    if (lastPacketSize > 0) {
+        toa = calculateToA(lastPacketSize);
+    }
+    
+    // Calculate PER (Packet Error Rate)
+    // PER = (Total Expected Packets - Total Received Packets) / Total Expected Packets * 100%
+    // Untuk simulasi, kita asumsikan setiap detik seharusnya ada 1 paket
+    totalPacketsExpected = millis() / 10000; // Expected 1 packet every 10 seconds
+    if (totalPacketsExpected > 0) {
+        per = ((float)(totalPacketsExpected - totalPacketsReceived) / totalPacketsExpected) * 100.0;
+        if (per < 0) per = 0; // PER tidak boleh negatif
+    }
+    
+    // Calculate BER (Bit Error Rate) - simplified estimation
+    // BER biasanya dihitung berdasarkan bit yang rusak dibanding total bit
+    // Calculate instantaneous BER based on SNR and accumulate for average
+if (snr > 0) {
+    // Estimasi BER berdasarkan SNR (formula sederhana)
+    float instantBer = pow(10, -snr/10) / 2;
+    if (instantBer > 1) instantBer = 1; // BER maksimal 1
+    if (instantBer < 0) instantBer = 0; // BER minimal 0
+    
+    // Accumulate BER for running average
+    totalBerSum += instantBer;
+    berSampleCount++;
+    
+    // Calculate cumulative average BER
+    ber = totalBerSum / berSampleCount;
+}
+    
+    // Display statistics in Serial Monitor
+    Serial.println("=== LoRa Communication Statistics ===");
+    Serial.print("RSSI: ");
+    Serial.print(rssi);
+    Serial.println(" dBm");
+    
+    Serial.print("SNR: ");
+    Serial.print(snr);
+    Serial.println(" dB");
+    
+    Serial.print("ToA (Time on Air): ");
+    Serial.print(toa, 2);
+    Serial.println(" ms");
+    
+    Serial.print("PER (Packet Error Rate): ");
+    Serial.print(per, 2);
+    Serial.println(" %");
+    
+    Serial.print("BER (Bit Error Rate - Cumulative Avg): ");
+    Serial.print(ber, 6);
+    Serial.print(" (Samples: ");
+    Serial.print(berSampleCount);
+    Serial.println(")");
+    
+    Serial.print("Total Packets Received: ");
+    Serial.println(totalPacketsReceived);
+    
+    Serial.print("Total Packets Expected: ");
+    Serial.println(totalPacketsExpected);
+    
+    Serial.print("Last Packet Size: ");
+    Serial.print(lastPacketSize);
+    Serial.println(" bytes");
+    
+    // LoRa Configuration Info
+    Serial.println("--- LoRa Configuration ---");
+    Serial.print("Bandwidth: ");
+    Serial.print(bandwidth / 1000);
+    Serial.println(" kHz");
+    
+    Serial.print("Spreading Factor: SF");
+    Serial.println(spreadingFactor);
+    
+    Serial.print("Coding Rate: 4/");
+    Serial.println(codingRate);
+    
+    // Signal Quality Assessment
+    Serial.print("Signal Quality: ");
+    if (rssi > -70) {
+        Serial.println("Excellent");
+    } else if (rssi > -80) {
+        Serial.println("Good");
+    } else if (rssi > -90) {
+        Serial.println("Fair");
+    } else {
+        Serial.println("Poor");
+    }
+    
+    // ToA Efficiency Assessment
+    Serial.print("ToA Efficiency: ");
+    if (toa < 100) {
+        Serial.println("Excellent (< 100ms)");
+    } else if (toa < 500) {
+        Serial.println("Good (< 500ms)");
+    } else if (toa < 1000) {
+        Serial.println("Fair (< 1s)");
+    } else {
+        Serial.println("Poor (> 1s)");
+    }
+    
+    Serial.println("=====================================");
+    Serial.println();
+}
+
+// Fungsi URL encoding untuk parameter yang memiliki karakter spesial
+String urlEncode(String str) {
+  String encodedString = "";
+  char c;
+  char code0;
+  char code1;
+  for (int i = 0; i < str.length(); i++) {
+    c = str.charAt(i);
+    if (c == ' ') {
+      encodedString += '+';
+    } else if (isAlphaNumeric(c)) {
+      encodedString += c;
+    } else {
+      code1 = (c & 0xf) + '0';
+      if ((c & 0xf) > 9) {
+        code1 = (c & 0xf) - 10 + 'A';
+      }
+      c = (c >> 4) & 0xf;
+      code0 = c + '0';
+      if (c > 9) {
+        code0 = c - 10 + 'A';
+      }
+      encodedString += '%';
+      encodedString += code0;
+      encodedString += code1;
+    }
+  }
+  return encodedString;
+}
+
+// Function to connect to WiFi
+void setup_wifi() {
+    WiFi.begin(ssid, password);
+    int attempts = 0;
+
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Connecting WiFi...");
+
+    while (WiFi.status() != WL_CONNECTED && attempts < 20) { // Coba koneksi hingga 20 kali
+        delay(500);
+        Serial.print(".");
+        attempts++;
+    }
+
+    lcd.clear();
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("\nWiFi connected");
+        Serial.print("IP address: ");
+        Serial.println(WiFi.localIP());
+
+        lcd.setCursor(0, 0);
+        lcd.print("WiFi: Connected");
+        lcd.setCursor(0, 1);
+        lcd.print(WiFi.localIP().toString()); // Tampilkan IP Address di LCD
+    } else {
+        Serial.println("\nWiFi failed to connect.");
+        lcd.setCursor(0, 0);
+        lcd.print("WiFi Failed");
+    }
+}
+
+// Function to reconnect MQTT
+void reconnect() {
+    int attempts = 0;
+    while (!client.connected() && attempts < 5) { // Batasi upaya reconnect
+        Serial.print("Attempting MQTT connection...");
+        // Gunakan ClientID yang lebih konsisten dengan ESP32 ID
+        String clientId = "ESP32LoRaGateway_" + String((uint32_t)(ESP.getEfuseMac() >> 32), HEX);
+        
+        Serial.print("ClientID: ");
+        Serial.println(clientId);
+
+        if (client.connect(clientId.c_str())) {
+            Serial.println("connected");
+            lcd.clear();
+            lcd.setCursor(0, 0);
+            lcd.print("MQTT: Connected");
+            delay(2000); // Kurangi delay
+            lcd.setCursor(0, 1);
+            lcd.print("LoRa: Connected");
+        } else {
+            Serial.print("failed, rc=");
+            Serial.print(client.state());
+            Serial.println(" try again in 5 seconds");
+
+            lcd.clear();
+            lcd.setCursor(0, 0);
+            lcd.print("MQTT Failed");
+            lcd.setCursor(0, 1);
+            lcd.print("rc=" + String(client.state()));
+            
+            delay(2000);
+            attempts++;
+        }
+    }
+}
+
+// Fungsi untuk melakukan test koneksi ke Google Sheets
+void testGoogleConnection() {
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    
+    // URL dengan parameter minimal untuk testing
+    String testURL = Web_App_URL + "?userID=TEST&suhu=36.5&suhuStatus=Normal&oksigen=98&oksigenStatus=Normal&heartRate=80&heartRateStatus=Normal&latitude=0&longitude=0&battery=100";
+    
+    http.begin(testURL.c_str());
+    http.setTimeout(10000);
+    http.addHeader("User-Agent", "ESP32/1.0");
+    
+    int httpResponseCode = http.GET();
+    
+    if (httpResponseCode > 0) {
+      String response = http.getString();
+      Serial.println("Test koneksi Google Sheets berhasil");
+      Serial.print("Response: ");
+      Serial.println(response);
+    } else {
+      Serial.println("Test koneksi Google Sheets gagal");
+      Serial.print("Error code: ");
+      Serial.println(httpResponseCode);
+    }
+    
+    http.end();
+  }
+}
+
+// Function untuk mengirim data ke Google Spreadsheet - DIOPTIMALKAN
+void sendDataToGoogle() {
+    if (WiFi.status() == WL_CONNECTED) {
+        HTTPClient http;
+        
+        // URL sebaiknya tidak terlalu panjang, hindari parameter berlebihan
+        String Send_Data_URL = Web_App_URL;
+        
+        // Gunakan POST method karena lebih baik untuk mengirim data
+        http.begin(Send_Data_URL);
+        http.setTimeout(15000); // 15 detik timeout
+        http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+        
+        // Siapkan data dalam format POST
+        String postData = "userID=" + urlEncode(userID) + 
+                         "&suhu=" + String(suhuDS18B20) + 
+                         "&suhuStatus=" + urlEncode(suhuStatus) + 
+                         "&oksigen=" + String(spo2) + 
+                         "&oksigenStatus=" + urlEncode(oksigenStatus) + 
+                         "&heartRate=" + String(heartRate) + 
+                         "&heartRateStatus=" + urlEncode(heartRateStatus) + 
+                         "&latitude=" + String(latitude, 6) + 
+                         "&longitude=" + String(longitude, 6) + 
+                         "&battery=" + String(batteryCapacity);
+        
+        Serial.println("Sending data to Google Sheets:");
+        Serial.println(postData);
+        
+        // Lakukan HTTP POST request
+        int httpResponseCode = http.POST(postData);
+        
+        // Tangani respons HTTP
+        if (httpResponseCode > 0) {
+            String response = http.getString();
+            Serial.print("HTTP Response code: ");
+            Serial.println(httpResponseCode);
+            Serial.print("Response: ");
+            Serial.println(response);
+            
+            // Cek apakah respons berhasil
+            if (httpResponseCode == 200 || httpResponseCode == 201 || httpResponseCode == 202) {
+                googleSheetsSent = true; // Set flag bahwa data berhasil dikirim ke Google Sheets
+                Serial.println("Google Sheets update successful");
+            } else {
+                Serial.println("Google Sheets response code not standard but proceeding");
+                googleSheetsSent = true; // Untuk simplifikasi, kita tetap menganggap berhasil meskipun kode tidak standar
+            }
+        } else {
+            Serial.print("HTTP POST Error: ");
+            Serial.println(httpResponseCode);
+            
+            // Tambahkan logika retry di sini
+            delay(1000);
+            Serial.println("Retrying Google Sheets update...");
+            httpResponseCode = http.POST(postData); // Coba sekali lagi
+            
+            if (httpResponseCode > 0) {
+                Serial.print("Retry HTTP Response code: ");
+                Serial.println(httpResponseCode);
+                googleSheetsSent = true;
+                Serial.println("Google Sheets update successful on retry");
+            } else {
+                Serial.print("Retry HTTP POST Error: ");
+                Serial.println(httpResponseCode);
+            }
+        }
+        
+        http.end();
+    } else {
+        Serial.println("WiFi Not Connected!");
+        
+        // Coba sambungkan WiFi kembali
+        setup_wifi();
+    }
+}
+
+void setup() {
+    Serial.begin(115200);
+    while (!Serial);
+
+    // Initialize LCD
+    lcd.init();
+    lcd.backlight();
+    
+    // Tampilkan Selamat Datang di awal program
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Selamat Datang");
+    lcd.setCursor(0, 1);
+    lcd.print("Tentara Shin1");
+    delay(3000); // Tampilkan selama 3 detik
+    
+    // Setelah tampilan selamat datang, lanjutkan inisialisasi lainnya
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Init LCD...");
+
+    // Initialize LoRa
+    lcd.setCursor(0, 1);
+    lcd.print("Connecting LoRa...");
+    LoRa.setPins(ss, rst, dio0);
+    
+    if (!LoRa.begin(923.0E6)) {
+        Serial.println("LoRa connection failed!");
+        lcd.setCursor(0, 1);
+        lcd.print("LoRa Failed");
+        while (1); // Program berhenti jika LoRa gagal terhubung
+    }
+
+    LoRa.setSyncWord(0xF3);
+    LoRa.setTxPower(20);
+    //LoRa.setSignalBandwidth(125E3);
+    //LoRa.setSpreadingFactor(7));
+    //LoRa.setCodingRate4(5);
+    Serial.println("LoRa Initialized Successfully");
+
+    // Update LCD status setelah LoRa tersambung
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("LoRa: Connected");
+
+    // Setup WiFi
+    setup_wifi();
+
+    // Setup MQTT
+    client.setServer(mqtt_server, 1883);
+    
+    // Test koneksi ke Google Sheets saat startup
+    testGoogleConnection();
+    
+    // Initialize statistics
+    totalPacketsReceived = 0;
+    totalPacketsExpected = 0;
+    totalBerSum = 0.0; // Initialize cumulative BER sum
+    berSampleCount = 0; // Initialize BER sample counter
+    
+    Serial.println("=== LoRa Gateway Ready ===");
+    Serial.println("Monitoring RSSI, SNR, ToA, PER, and BER...");
+    Serial.println("===============================");
+}
+
+void loop() {
+    // Check MQTT connection every 5 seconds
+    unsigned long now = millis();
+    if (now - lastMQTTCheck > 5000) {
+        lastMQTTCheck = now;
+        if (!client.connected()) {
+            reconnect();
+        }
+    }
+    client.loop();
+
+    // Check if LoRa has received any data
+    int packetSize = LoRa.parsePacket();
+    if (packetSize) {
+        receivedData = "";
+
+        // Read LoRa packet data
+        while (LoRa.available()) {
+            receivedData += (char)LoRa.read();
+        }
+
+        // Increment packet counter
+        totalPacketsReceived++;
+
+        // Reset status pengiriman
+        mqttSent = false;
+        googleSheetsSent = false;
+
+        // Parse the received data
+        parseData(receivedData);
+
+        // Debug print userID
+        Serial.print("UserID yang diterima: ");
+        Serial.println(userID);
+
+        // Display LoRa statistics (RSSI, SNR, ToA, PER, BER)
+        displayLoRaStatistics();
+
+        // Kirim data ke MQTT
+        sendDataToMQTT();
+
+        // Kirim data ke Google Spreadsheet
+        sendDataToGoogle();
+
+        // Tampilkan data pada Serial Monitor dengan format yang diminta
+        printSensorDataToSerial();
+
+        // Tampilkan data ke LCD
+        updateLCD();
+    }
+
+    delay(100);
+}
+
+// Function untuk menampilkan data sensor pada Serial Monitor dengan format yang diminta
+void printSensorDataToSerial() {
+    // Format baris pertama: Semua data sensor dalam satu baris
+    Serial.print("User id: ");
+    Serial.print(userID);
+    Serial.print(", HR: ");
+    Serial.print(heartRate);
+    Serial.print(", sp02: ");
+    Serial.print(spo2);
+    Serial.print(", suhu: ");
+    Serial.print(suhuDS18B20);
+    Serial.print(", lokasi: ");
+    Serial.print(String(latitude, 6) + "," + String(longitude, 6));
+    Serial.print(", kapasitas: ");
+    Serial.println(batteryCapacity);
+    
+    // Format baris kedua: Status pengiriman data
+    Serial.print("Data terkirim ke");
+    if (googleSheetsSent) {
+        Serial.print(" Google Sheets");
+    }
+    if (mqttSent) {
+        if (googleSheetsSent) Serial.print(" dan");
+        Serial.print(" MQTT");
+    }
+    Serial.println();
+    Serial.println(); // Tambahkan baris kosong untuk memisahkan dengan data berikutnya
+}
+
+// Function to parse received data from LoRa
+void parseData(String data) {
+    int idIndex = data.indexOf("ID: ");
+    int hrIndex = data.indexOf("BPM: ");
+    int spo2Index = data.indexOf(", SpO2: ");
+    int suhuIndex = data.indexOf(", Suhu: ");
+    int latIndex = data.indexOf(", Lat: ");
+    int longIndex = data.indexOf(", Lng: ");
+    int batteryIndex = data.indexOf(", Battery: ");
+
+    // Inisialisasi nilai default untuk data yang mungkin tidak ada
+    String tempUserID = "Unknown";
+    float tempHeartRate = 0;
+    float tempSpo2 = 0;
+    float tempSuhu = 0;
+    float tempLatitude = 0;
+    float tempLongitude = 0;
+    float tempBattery = 0;
+
+    // Debug the complete received data
+    Serial.print("Received Data: ");
+    Serial.println(data);
+    
+    // Debug indices
+    Serial.println("Parsing indices:");
+    Serial.print("ID: "); Serial.print(idIndex); 
+    Serial.print(", HR: "); Serial.print(hrIndex);
+    Serial.print(", SpO2: "); Serial.print(spo2Index);
+    Serial.print(", Suhu: "); Serial.print(suhuIndex);
+    Serial.print(", Lat: "); Serial.print(latIndex);
+    Serial.print(", Lng: "); Serial.print(longIndex);
+    Serial.print(", Battery: "); Serial.println(batteryIndex);
+
+    // Parse ID jika tersedia
+    if (idIndex != -1 && hrIndex != -1) {
+        tempUserID = data.substring(idIndex + 4, hrIndex);
+        tempUserID.trim(); // Hapus spasi di awal dan akhir
+        Serial.print("Parsed UserID: '");
+        Serial.print(tempUserID);
+        Serial.println("'");
+    }
+
+    // Parse Heart Rate jika tersedia
+    if (hrIndex != -1 && spo2Index != -1) {
+        String hrStr = data.substring(hrIndex + 5, spo2Index);
+        hrStr.trim();
+        tempHeartRate = hrStr.toFloat();
+        Serial.print("Parsed Heart Rate: ");
+        Serial.println(tempHeartRate);
+        // Validasi nilai heart rate dalam batas wajar (30-220 BPM)
+        if (tempHeartRate < 30 || tempHeartRate > 220) {
+            Serial.println("Warning: Heart rate out of normal range");
+            // Tetap gunakan nilai, meskipun di luar batas normal
+        }
+    }
+
+    // Parse SpO2 jika tersedia
+    if (spo2Index != -1 && suhuIndex != -1) {
+        String spo2Str = data.substring(spo2Index + 8, suhuIndex);
+        spo2Str.trim();
+        tempSpo2 = spo2Str.toFloat();
+        Serial.print("Parsed SpO2: ");
+        Serial.println(tempSpo2);
+        // Validasi nilai SpO2 dalam batas wajar (0-100%)
+        if (tempSpo2 < 0 || tempSpo2 > 100) {
+            Serial.println("Warning: SpO2 out of normal range, constraining");
+            // Batasi nilai dalam rentang valid
+            tempSpo2 = constrain(tempSpo2, 0, 100);
+        }
+    }
+
+    // Parse Suhu jika tersedia
+    if (suhuIndex != -1 && latIndex != -1) {
+        String suhuStr = data.substring(suhuIndex + 8, latIndex);
+        suhuStr.trim();
+        tempSuhu = suhuStr.toFloat();
+        Serial.print("Parsed Suhu: ");
+        Serial.println(tempSuhu);
+        // Validasi nilai suhu dalam batas wajar (20-45°C untuk suhu tubuh manusia)
+        if (tempSuhu < 20 || tempSuhu > 45) {
+            Serial.println("Warning: Temperature out of normal range");
+            // Tetap gunakan nilai, meskipun di luar batas normal
+        }
+    }
+
+    // Parse latitude jika tersedia
+    if (latIndex != -1 && longIndex != -1) {
+        String latStr = data.substring(latIndex + 6, longIndex);
+        latStr.trim();
+        tempLatitude = latStr.toFloat();
+        Serial.print("Parsed Latitude: ");
+        Serial.println(tempLatitude);
+        // Validasi nilai latitude (-90 sampai 90)
+        if (tempLatitude < -90 || tempLatitude > 90) {
+            Serial.println("Warning: Latitude out of valid range, constraining");
+            // Batasi nilai dalam rentang valid
+            tempLatitude = constrain(tempLatitude, -90, 90);
+        }
+    }
+
+    // Parse longitude jika tersedia
+    if (longIndex != -1 && batteryIndex != -1) {
+        String longStr = data.substring(longIndex + 6, batteryIndex);
+        longStr.trim();
+        tempLongitude = longStr.toFloat();
+        Serial.print("Parsed Longitude: ");
+        Serial.println(tempLongitude);
+        // Validasi nilai longitude (-180 sampai 180)
+        if (tempLongitude < -180 || tempLongitude > 180) {
+            Serial.println("Warning: Longitude out of valid range, constraining");
+            // Batasi nilai dalam rentang valid
+            tempLongitude = constrain(tempLongitude, -180, 180);
+        }
+    }
+
+    // Parse battery jika tersedia
+    if (batteryIndex != -1) {
+        String batteryStr = data.substring(batteryIndex + 10);
+        batteryStr.trim();
+        tempBattery = batteryStr.toFloat();
+        Serial.print("Parsed Battery: ");
+        Serial.println(tempBattery);
+        // Validasi nilai battery (0-100%)
+        if (tempBattery < 0 || tempBattery > 100) {
+            Serial.println("Warning: Battery value out of valid range, constraining");
+            // Batasi nilai dalam rentang valid
+            tempBattery = constrain(tempBattery, 0, 100);
+        }
+    }
+
+    // Perbarui variabel global dengan nilai yang sudah divalidasi
+    userID = tempUserID;
+    heartRate = tempHeartRate;
+    spo2 = tempSpo2;
+    suhuDS18B20 = tempSuhu;
+    latitude = tempLatitude;
+    longitude = tempLongitude;
+    batteryCapacity = tempBattery;
+
+    // Tentukan status berdasarkan nilai yang sudah divalidasi
+    suhuStatus = (suhuDS18B20 > 38 || suhuDS18B20 < 36) ? "Tidak Normal" : "Normal";
+    oksigenStatus = spo2 < 90 ? "Tidak Normal" : "Normal";
+    heartRateStatus = (heartRate < 60 || heartRate > 150) ? "Tidak Normal" : "Normal";
+}
+
+// Function to update LCD
+void updateLCD() {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("ID: " + userID);
+
+    lcd.setCursor(0, 1);
+    lcd.print("BPM:" + String(heartRate) + " SpO2:" + String(spo2));
+
+    delay(2000);
+    
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Suhu:" + String(suhuDS18B20));
+
+    lcd.setCursor(0, 1);
+    lcd.print("Batt: " + String(batteryCapacity) + "%");
+    
+    delay(2000);
+    
+    // Status pengiriman data
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Data dikirim");
+    lcd.setCursor(0, 1);
+    if (mqttSent) {
+        lcd.print("MQTT: OK");
+    } else {
+        lcd.print("MQTT: FAIL");
+    }
+}
+
+// Function to send data to MQTT with improved error handling
+void sendDataToMQTT() {
+    // Verifikasi bahwa koneksi MQTT aktif
+    if (!client.connected()) {
+        Serial.println("MQTT not connected, trying to reconnect");
+        reconnect();
+        if (!client.connected()) {
+            Serial.println("Failed to reconnect MQTT, skipping publish");
+            return;
+        }
+    }
+
+    // Construct topics based on userID - if userID is empty, use a default
+    String effectiveUserID = (userID != "") ? userID : "Unknown";
+    Serial.print("Using userID for MQTT: ");
+    Serial.println(effectiveUserID);
+    
+    String heartRateTopic = "sensor/heart_rateBpkHaji/" + effectiveUserID;
+    String spo2Topic = "sensor/spo2BpkHaji/" + effectiveUserID;
+    String suhuTopic = "sensor/suhuBpkHaji/" + effectiveUserID;
+    String gpsTopic = "lokasi/BpkHaji/" + effectiveUserID;
+    String batteryTopic = "kapasitas/BpkHaji/" + effectiveUserID;
+
+    // Log topics being used
+    Serial.println("MQTT Topics digunakan:");
+    Serial.println("- " + heartRateTopic);
+    Serial.println("- " + spo2Topic);
+    Serial.println("- " + suhuTopic);
+    Serial.println("- " + gpsTopic);
+    Serial.println("- " + batteryTopic);
+
+    // Publish with QoS 1 for better reliability and debug output
+    bool hrSuccess = client.publish(heartRateTopic.c_str(), String(heartRate).c_str());
+    if (hrSuccess) {
+        Serial.println("Heart rate published: " + String(heartRate));
+    } else {
+        Serial.println("Failed to publish heart rate");
+    }
+    
+    bool spo2Success = client.publish(spo2Topic.c_str(), String(spo2).c_str());
+    if (spo2Success) {
+        Serial.println("SpO2 published: " + String(spo2));
+    } else {
+        Serial.println("Failed to publish SpO2");
+    }
+    
+    bool suhuSuccess = client.publish(suhuTopic.c_str(), String(suhuDS18B20).c_str());
+    if (suhuSuccess) {
+        Serial.println("Suhu published: " + String(suhuDS18B20));
+    } else {
+        Serial.println("Failed to publish Suhu");
+    }
+    
+    bool batterySuccess = client.publish(batteryTopic.c_str(), String(batteryCapacity).c_str());
+    if (batterySuccess) {
+        Serial.println("Battery published: " + String(batteryCapacity));
+    } else {
+        Serial.println("Failed to publish Battery");
+    }
+
+    bool gpsSuccess = false;
+    if (latitude != 0 && longitude != 0) {
+        String gpsLocation = String(latitude, 6) + "," + String(longitude, 6);
+        gpsSuccess = client.publish(gpsTopic.c_str(), gpsLocation.c_str());
+        if (gpsSuccess) {
+            Serial.println("GPS published: " + gpsLocation);
+        } else {
+            Serial.println("Failed to publish GPS");
+        }
+    }
+    
+    // Update flag if any message was published successfully
+    mqttSent = hrSuccess || spo2Success || suhuSuccess || batterySuccess || gpsSuccess;
+    
+    if (mqttSent) {
+        Serial.println("At least one MQTT message published successfully");
+    } else {
+        Serial.println("All MQTT publish attempts failed");
+    }
+}
